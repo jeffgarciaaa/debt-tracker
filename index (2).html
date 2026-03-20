@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Debt Tracker" />
+  <meta name="theme-color" content="#06060f" />
+  <title>Debt Tracker · Jeff & Keyla</title>
+
+  <!-- PWA manifest inline -->
+  <script>
+    const manifest = {
+      name: "Debt Tracker · Jeff & Keyla",
+      short_name: "Debt Tracker",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#06060f",
+      theme_color: "#06060f",
+      icons: [{ src: "https://placehold.co/192x192/d4a017/06060f?text=DT", sizes: "192x192", type: "image/png" }]
+    };
+    const blob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
+    const link = document.createElement("link");
+    link.rel = "manifest";
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  </script>
+
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { background: #06060f; color: #dde6f0; font-family: 'Courier New', Courier, monospace; overscroll-behavior: none; }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo } = React;
+
+// ─── DATA ────────────────────────────────────────────────────────────────────
+
+const CF_START   = 7881;
+const DAILY_RATE = 0.2724 / 365;
+const TODAY      = new Date(2026, 2, 20);
+const FREEDOM    = new Date(2028, 10, 1);
+
+const BASE_PMTS = [
+  { id:1,  date:new Date(2026,2,27), label:"💰 Bonus",     who:"$", amount:1721, type:"bonus", note:"Bonus hits — installments gone, $1,721 to CF"     },
+  { id:2,  date:new Date(2026,3,3),  label:"Keyla · K1",   who:"K", amount:639,  type:"check", note:""                                                  },
+  { id:3,  date:new Date(2026,3,10), label:"Jeff · J1 🚀", who:"J", amount:815,  type:"check", note:"First raised paycheck!"                            },
+  { id:4,  date:new Date(2026,3,17), label:"Keyla · K2",   who:"K", amount:346,  type:"check", note:""                                                  },
+  { id:5,  date:new Date(2026,3,24), label:"Jeff · J2",    who:"J", amount:454,  type:"check", note:""                                                  },
+  { id:6,  date:new Date(2026,4,1),  label:"Keyla · K1",   who:"K", amount:639,  type:"check", note:""                                                  },
+  { id:7,  date:new Date(2026,4,1),  label:"Keyla · K1",   who:"K", amount:639,  type:"check", note:""                                                  },
+  { id:7,  date:new Date(2026,4,8),  label:"Jeff · J1",    who:"J", amount:815,  type:"check", note:""                                                  },
+  { id:8,  date:new Date(2026,4,15), label:"Keyla · K2",   who:"K", amount:346,  type:"check", note:""                                                  },
+  { id:9,  date:new Date(2026,4,22), label:"Jeff · J2",    who:"J", amount:454,  type:"check", note:""                                                  },
+  { id:10, date:new Date(2026,5,5),  label:"Keyla · K1",   who:"K", amount:639,  type:"check", note:""                                                  },
+  { id:11, date:new Date(2026,5,12), label:"Jeff · J1",    who:"J", amount:815,  type:"check", note:""                                                  },
+  { id:12, date:new Date(2026,5,19), label:"Keyla · K2",   who:"K", amount:346,  type:"check", note:"🏆 Final payment — Chase Freedom is DONE!"         },
+];
+
+const TRUCK_PMT = {
+  id:99, date:new Date(2026,3,15), label:"🚚 Truck Sale", who:"$", amount:3000,
+  type:"truck", note:"F-150 sold — $3,000 straight to CF",
+};
+
+const CARDS = [
+  { name:"Chase Freedom",     bal:7881,  apr:27.24, min:301, color:"#d4a017", target:true  },
+  { name:"Chase Sapphire",    bal:19548, apr:27.49, min:641, color:"#f87171"               },
+  { name:"Amex Gold",         bal:10271, apr:27.24, min:371, color:"#fb923c"               },
+  { name:"BofA Travel",       bal:11490, apr:20.74, min:358, color:"#c084fc"               },
+  { name:"Discover (Jeff)",   bal:18098, apr:16.99, min:454, color:"#60a5fa"               },
+  { name:"Discover (Keyla)",  bal:25586, apr:16.99, min:520, color:"#34d399"               },
+  { name:"BofA Platinum",     bal:9397,  apr:6.25,  min:198, color:"#94a3b8"               },
+  { name:"BofA Cash Rewards", bal:11178, apr:4.75,  min:228, color:"#64748b"               },
+];
+
+const TOTAL_DEBT = CARDS.reduce((s, c) => s + c.bal, 0);
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+const $    = n => "$" + Math.round(Math.abs(n)).toLocaleString();
+const $$   = n => "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+const days = d => Math.max(0, Math.ceil((d - TODAY) / 86400000));
+const fmt  = d => d.toLocaleDateString("en-US", { month:"short", day:"numeric" });
+
+function buildProjections(includeTruck) {
+  const all = (includeTruck ? [...BASE_PMTS, TRUCK_PMT] : BASE_PMTS).sort((a,b)=>a.date-b.date);
+  let bal = CF_START, prev = new Date(TODAY);
+  return all.reduce((out, p) => {
+    if (bal <= 0.01) return out;
+    const d   = Math.max(0, (p.date - prev) / 86400000);
+    const int = Math.round(bal * DAILY_RATE * d * 100) / 100;
+    const bef = Math.round((bal + int) * 100) / 100;
+    const aft = Math.max(0, Math.round((bef - p.amount) * 100) / 100);
+    prev = new Date(p.date);
+    bal  = aft;
+    return [...out, { ...p, before:bef, after:aft, interest:int, isPayoff:aft<=0.01 }];
+  }, []);
+}
+
+// ─── THEME ───────────────────────────────────────────────────────────────────
+
+const C = {
+  bg:"#06060f", card:"#0d0d1e", card2:"#111128", border:"#18183a",
+  text:"#dde6f0", muted:"#4a5568", gold:"#d4a017", green:"#4ade80",
+  red:"#f87171", yellow:"#fbbf24", orange:"#fb923c", pink:"#f472b6", blue:"#60a5fa",
+};
+const mono   = { fontFamily:"'Courier New', Courier, monospace" };
+const box    = (x={}) => ({ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px", marginBottom:"10px", ...x });
+const kpiBox = (x={}) => ({ background:C.card2, borderRadius:"8px", padding:"8px 10px", textAlign:"center", ...x });
+
+// ─── APP ─────────────────────────────────────────────────────────────────────
+
+function App() {
+  const [tab,     setTab]     = useState("home");
+  const [checked, setChecked] = useState(new Set());
+  const [truck,   setTruck]   = useState(false);
+
+  const projs = useMemo(() => buildProjections(truck), [truck]);
+
+  const lastCheckedIdx = projs.reduce((hi,p,i) => checked.has(p.id) ? i : hi, -1);
+  const currentBal     = lastCheckedIdx >= 0 ? projs[lastCheckedIdx].after : CF_START;
+  const cfPct          = Math.max(0, Math.round((CF_START - currentBal) / CF_START * 100));
+  const nextPmt        = projs.find(p => !checked.has(p.id));
+  const payoffDate     = projs.find(p => p.isPayoff)?.date ?? new Date(2026,5,19);
+
+  const toggle = (id) => {
+    const idx = projs.findIndex(p => p.id === id);
+    const s   = new Set(checked);
+    if (s.has(id)) { projs.slice(idx).forEach(p => s.delete(p.id)); }
+    else           { projs.slice(0, idx+1).forEach(p => s.add(p.id)); }
+    setChecked(s);
+  };
+
+  // HOME
+  const Home = () => (
+    <div style={{ padding:"14px 14px 0" }}>
+      <div style={box({ borderColor:C.gold })}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"10px" }}>
+          <div>
+            <div style={{ color:C.muted, fontSize:"10px", letterSpacing:"2px" }}>🎯 CURRENT TARGET</div>
+            <div style={{ color:C.gold, fontSize:"22px", fontWeight:"bold" }}>Chase Freedom</div>
+            <div style={{ color:C.muted, fontSize:"11px" }}>27.24% APR · Jun 2026</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ color:C.red, fontSize:"26px", fontWeight:"bold", ...mono }}>{$$(currentBal)}</div>
+            <div style={{ color:C.green, fontSize:"12px" }}>{cfPct}% paid off</div>
+            <div style={{ color:C.muted, fontSize:"11px" }}>of {$$(CF_START)}</div>
+          </div>
+        </div>
+        <div style={{ height:"8px", background:C.card2, borderRadius:"4px", overflow:"hidden", marginBottom:"12px" }}>
+          <div style={{ height:"100%", width:`${cfPct}%`, background:`linear-gradient(90deg,${C.gold},#f59e0b)`, borderRadius:"4px", transition:"width .5s ease" }} />
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px" }}>
+          {[
+            { l:"Days to Payoff",  v:`${days(payoffDate)}d`,        c: days(payoffDate) < 60 ? C.green : C.yellow },
+            { l:"Monthly to CF",   v:truck ? "+$5,254":"+$2,254",   c: C.green  },
+            { l:"Interest/Mo",     v:$(currentBal * 0.2724 / 12),   c: C.orange },
+          ].map(k => (
+            <div key={k.l} style={kpiBox()}>
+              <div style={{ color:C.muted, fontSize:"9px", marginBottom:"3px" }}>{k.l}</div>
+              <div style={{ color:k.c, fontSize:"14px", fontWeight:"bold", ...mono }}>{k.v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"10px" }}>
+        <div style={box({ textAlign:"center", marginBottom:0 })}>
+          <div style={{ color:C.muted, fontSize:"9px", letterSpacing:"1px" }}>CF PAYOFF</div>
+          <div style={{ color:C.gold, fontSize:"34px", fontWeight:"bold", ...mono, lineHeight:1.1 }}>{days(payoffDate)}</div>
+          <div style={{ color:C.muted, fontSize:"10px" }}>days · Jun 2026</div>
+        </div>
+        <div style={box({ textAlign:"center", marginBottom:0 })}>
+          <div style={{ color:C.muted, fontSize:"9px", letterSpacing:"1px" }}>DEBT FREEDOM</div>
+          <div style={{ color:C.green, fontSize:"34px", fontWeight:"bold", ...mono, lineHeight:1.1 }}>{days(FREEDOM)}</div>
+          <div style={{ color:C.muted, fontSize:"10px" }}>days · Nov 2028</div>
+        </div>
+      </div>
+
+      {nextPmt && (
+        <div style={box({ borderColor:C.gold })}>
+          <div style={{ color:C.muted, fontSize:"10px", letterSpacing:"2px", marginBottom:"8px" }}>⚡ NEXT PAYMENT</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontSize:"17px", fontWeight:"bold" }}>{nextPmt.label}</div>
+              <div style={{ color:C.muted, fontSize:"12px" }}>{fmt(nextPmt.date)}</div>
+              {nextPmt.note && <div style={{ color:C.yellow, fontSize:"11px", marginTop:"4px" }}>{nextPmt.note}</div>}
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ color:C.green, fontSize:"22px", fontWeight:"bold", ...mono }}>+{$$(nextPmt.amount)}</div>
+              <div style={{ color:C.muted, fontSize:"11px" }}>→ Chase Freedom</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={box()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontSize:"14px" }}>🚚 F-150 Truck Sale</div>
+            <div style={{ color:C.muted, fontSize:"11px" }}>$3,000 · Facebook Marketplace</div>
+          </div>
+          <button onClick={() => setTruck(!truck)} style={{
+            background:truck ? C.green : C.card2, color:truck ? "#000" : C.muted,
+            border:`1px solid ${truck ? C.green : C.border}`, borderRadius:"20px",
+            padding:"7px 20px", cursor:"pointer", fontSize:"12px", fontWeight:"bold", ...mono,
+          }}>
+            {truck ? "✓ ON" : "OFF"}
+          </button>
+        </div>
+        {truck && (
+          <div style={{ color:C.green, fontSize:"11px", marginTop:"8px", background:"#0a1a0a", borderRadius:"6px", padding:"6px 10px" }}>
+            🔥 $3,000 applied Apr 15 → CF payoff jumps forward ~4–5 weeks!
+          </div>
+        )}
+      </div>
+
+      <div style={box()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
+          <span style={{ color:C.muted, fontSize:"12px" }}>Total CC Debt · 8 Cards</span>
+          <span style={{ color:C.red, fontSize:"17px", fontWeight:"bold", ...mono }}>{$(TOTAL_DEBT)}</span>
+        </div>
+        <div style={{ display:"flex", gap:"2px", height:"6px", borderRadius:"3px", overflow:"hidden" }}>
+          {CARDS.map(c => <div key={c.name} style={{ flex:c.bal, background:c.color }} />)}
+        </div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px" }}>
+          {CARDS.map((c,i) => (
+            <span key={c.name} style={{ fontSize:"10px", color:c.target ? C.gold : C.muted }}>
+              <span style={{ color:c.color }}>■</span> #{i+1} {c.name}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  // PAYMENTS
+  const Payments = () => (
+    <div style={{ padding:"14px 14px 0" }}>
+      <div style={{ color:C.muted, fontSize:"10px", letterSpacing:"2px", marginBottom:"12px" }}>
+        PAYCHECK TRACKER · TAP TO MARK PAID
+      </div>
+      {projs.map((p, i) => {
+        const done   = checked.has(p.id);
+        const isNext = !done && i === projs.findIndex(q => !checked.has(q.id));
+        const wc     = p.who==="K" ? C.pink : p.who==="J" ? C.blue : C.gold;
+        const bc     = done ? C.green : isNext ? C.gold : C.border;
+        return (
+          <div key={p.id} onClick={() => toggle(p.id)} style={{
+            background:done ? "#090f09" : isNext ? `${C.gold}10` : C.card,
+            border:`1px solid ${bc}`, borderLeft:`4px solid ${bc}`,
+            borderRadius:"12px", padding:"13px 14px", marginBottom:"8px", cursor:"pointer",
+            display:"flex", alignItems:"center", gap:"12px",
+          }}>
+            <div style={{
+              width:"32px", height:"32px", borderRadius:"50%", flexShrink:0,
+              background:done ? C.green : "transparent",
+              border:`2px solid ${done ? C.green : isNext ? C.gold : C.muted}`,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              color:done ? "#000" : C.muted, fontSize:done ? "16px" : "12px", fontWeight:"bold",
+            }}>
+              {done ? "✓" : i+1}
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                <div>
+                  <div>
+                    <span style={{ color:wc, fontWeight:"bold", fontSize:"14px" }}>{p.label}</span>
+                    {isNext && <span style={{ color:C.gold, fontSize:"10px", marginLeft:"6px", ...mono }}>← NEXT</span>}
+                  </div>
+                  <div style={{ color:C.muted, fontSize:"11px" }}>
+                    {fmt(p.date)}
+                    {p.interest > 0.5 && <span style={{ color:C.orange }}> · +${p.interest.toFixed(0)} interest</span>}
+                  </div>
+                  {p.note && <div style={{ color:C.yellow, fontSize:"10px", marginTop:"2px" }}>{p.note}</div>}
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0, marginLeft:"10px" }}>
+                  <div style={{ color:C.green, fontSize:"15px", fontWeight:"bold", ...mono }}>+{$$(p.amount)}</div>
+                  <div style={{ color:p.isPayoff ? C.gold : done ? C.green : C.muted, fontSize:"11px", ...mono }}>
+                    {p.isPayoff ? "🏆 DONE!" : `→ ${$$(p.after)}`}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {projs.some(p => checked.has(p.id) && p.isPayoff) && (
+        <div style={{ background:"#090f09", border:`2px solid ${C.gold}`, borderRadius:"12px", padding:"24px", textAlign:"center", marginTop:"4px" }}>
+          <div style={{ fontSize:"40px", marginBottom:"6px" }}>🏆</div>
+          <div style={{ color:C.gold, fontWeight:"bold", fontSize:"15px", ...mono }}>CHASE FREEDOM · PAID OFF!</div>
+          <div style={{ color:C.green, fontSize:"12px", marginTop:"6px" }}>$301/mo freed → Roll to Chase Sapphire (27.49% APR)</div>
+        </div>
+      )}
+    </div>
+  );
+
+  // CARDS
+  const Cards = () => {
+    const burn = Math.round(CARDS.reduce((s,c) => s + c.bal * c.apr / 100 / 12, 0));
+    return (
+      <div style={{ padding:"14px 14px 0" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"12px" }}>
+          <div style={box({ textAlign:"center", marginBottom:0 })}>
+            <div style={{ color:C.muted, fontSize:"9px" }}>TOTAL DEBT</div>
+            <div style={{ color:C.red, fontSize:"22px", fontWeight:"bold", ...mono }}>{$(TOTAL_DEBT)}</div>
+          </div>
+          <div style={box({ textAlign:"center", marginBottom:0 })}>
+            <div style={{ color:C.muted, fontSize:"9px" }}>CC INTEREST BURN</div>
+            <div style={{ color:C.orange, fontSize:"22px", fontWeight:"bold", ...mono }}>{$(burn)}/mo</div>
+          </div>
+        </div>
+        {CARDS.map((c,i) => {
+          const mi = Math.round(c.bal * c.apr / 100 / 12);
+          return (
+            <div key={c.name} style={{
+              background:C.card, border:`1px solid ${c.target ? C.gold : C.border}`,
+              borderLeft:`4px solid ${c.color}`, borderRadius:"10px", padding:"12px 14px", marginBottom:"8px",
+            }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                <div>
+                  <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"3px" }}>
+                    <span style={{ color:C.muted, fontSize:"11px", ...mono }}>#{i+1}</span>
+                    <span style={{ color:c.target ? C.gold : C.text, fontSize:"15px", fontWeight:c.target ? "bold" : "normal" }}>{c.name}</span>
+                    {c.target && <span style={{ background:C.gold, color:"#000", fontSize:"9px", padding:"1px 6px", borderRadius:"4px", ...mono }}>TARGET</span>}
+                  </div>
+                  <div style={{ color:C.muted, fontSize:"11px" }}>Min {$(c.min)}/mo · {c.apr}% APR</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:C.red, fontSize:"16px", fontWeight:"bold", ...mono }}>{$(c.bal)}</div>
+                  <div style={{ color:C.orange, fontSize:"11px" }}>{$(mi)}/mo interest</div>
+                </div>
+              </div>
+              <div style={{ height:"3px", background:C.border, borderRadius:"2px", marginTop:"8px" }}>
+                <div style={{ height:"100%", width:`${Math.round(c.bal/25586*100)}%`, background:c.color, borderRadius:"2px", opacity:.7 }} />
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ color:C.muted, fontSize:"10px", textAlign:"center", padding:"4px 0 8px" }}>
+          Hybrid: CF first (balance + APR combo) → then pure avalanche ↓
+        </div>
+      </div>
+    );
+  };
+
+  // SHELL
+  return (
+    <div style={{ background:C.bg, minHeight:"100dvh", color:C.text, ...mono, paddingBottom:"70px" }}>
+      <div style={{ background:C.card, borderBottom:`1px solid ${C.border}`, padding:"12px 16px 12px", paddingTop:"env(safe-area-inset-top, 12px)" }}>
+        <div style={{ color:C.gold, fontSize:"10px", letterSpacing:"3px" }}>DEBT TRACKER · JEFF & KEYLA</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:"3px" }}>
+          <div style={{ fontSize:"20px", fontWeight:"bold", fontFamily:"Georgia, serif" }}>Road to Freedom</div>
+          <div style={{ color:C.muted, fontSize:"11px" }}>Nov 2028 🎯</div>
+        </div>
+        <div style={{ height:"3px", background:C.card2, borderRadius:"2px", marginTop:"10px", overflow:"hidden" }}>
+          <div style={{ display:"flex", height:"100%" }}>
+            {CARDS.map(c => <div key={c.name} style={{ flex:c.bal, background:c.color, opacity:c.target?1:0.5 }} />)}
+          </div>
+        </div>
+      </div>
+
+      {tab === "home"  && <Home />}
+      {tab === "pmts"  && <Payments />}
+      {tab === "cards" && <Cards />}
+
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, background:C.card, borderTop:`1px solid ${C.border}`, display:"flex", height:"62px", paddingBottom:"env(safe-area-inset-bottom, 0px)", zIndex:100 }}>
+        {[{ id:"home", icon:"🏠", label:"Home" }, { id:"pmts", icon:"✓", label:"Payments" }, { id:"cards", icon:"💳", label:"Cards" }].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+            background:"none", border:"none", borderTop:`2px solid ${tab===t.id ? C.gold : "transparent"}`,
+            color:tab===t.id ? C.gold : C.muted, cursor:"pointer", fontSize:"10px", gap:"4px", padding:"4px 0",
+          }}>
+            <span style={{ fontSize:"20px" }}>{t.icon}</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
